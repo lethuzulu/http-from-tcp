@@ -3,7 +3,6 @@ use std::sync::mpsc::{Receiver, channel};
 use std::thread;
 use std::{fs::File, io::Read, str::from_utf8};
 
-
 pub fn get_lines_channel(mut file: TcpStream) -> Receiver<String> {
     let (sender, receiver) = channel::<String>();
 
