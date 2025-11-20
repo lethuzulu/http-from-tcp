@@ -1,5 +1,6 @@
 use std::io::Cursor;
 use std::io::Read;
+use std::io::Error as IoError;
 
 #[derive(Debug)]
 pub struct Request {
@@ -13,64 +14,67 @@ pub struct RequestLine {
     pub http_version: String,
 }
 
-pub fn request_from_reader<R: Read>(mut reader: R) -> Result<Request, String> {
+pub fn request_from_reader<R: Read>(mut reader: R) -> Result<Request, RequestError> {
     let mut buffer = String::new();
 
-    let _ = reader.read_to_string(&mut buffer).map_err(|_| "Error reading request".to_string())?;
+    let _ = reader
+        .read_to_string(&mut buffer)
+        .map_err(|_| RequestError::InvalidRequest)?;
 
-    let (request_line_str, _rest) = buffer.split_once("\r\n").ok_or("Error reading request".to_string())?;
+    let (request_line_str, _rest) = buffer
+        .split_once("\r\n")
+        .ok_or(RequestError::InvalidRequest)?;
 
     let request_line = parse_request_line(request_line_str).map_err(|e| e)?;
 
     Ok(Request { request_line })
 }
 
-pub fn parse_request_line(request_string: &str) -> Result<RequestLine, String> {
+pub fn parse_request_line(request_string: &str) -> Result<RequestLine, RequestError> {
+    let request_string_parts: Vec<&str> = request_string.split_ascii_whitespace().collect();
 
-    let request_string_parts: Vec<&str>= request_string.split_ascii_whitespace().collect();
-
-    if request_string_parts.len() != 3 {
-        return Err("Invalid Request Line".to_string());
+    if request_string_parts.len() < 3 {
+        return Err(RequestError::InvalidRequestLine);
     }
 
-    let method = request_string_parts[0];
-    let target = request_string_parts[1];
-    let version = request_string_parts[2];
+    let _method = request_string_parts.get(0).ok_or( RequestError::InvalidRequestLine)?;
+    let _target = request_string_parts.get(1).ok_or( RequestError::InvalidRequestLine)?;
+    let _http_version = request_string_parts.get(2).ok_or( RequestError::InvalidRequestLine)?;
 
-
-    let is_method_valid = validate_request_method(method);
-    let is_valid_target = validate_target(target);
-    let is_version_one = validate_http_version(version).map_err(|e|e)?;
-
-
-    if !is_method_valid && !is_valid_target {
-        return Err("Invalid Request Line".to_string());
-    }
+    let method = validate_request_method(_method).map_err(|e| e)?;
+    let request_target = validate_target(_target).map_err(|e| e)?;
+    let http_version = validate_http_version(_http_version).map_err(|e| e)?;
 
     Ok(RequestLine {
-        method: method.to_string(),
-        request_target: target.to_string(),
-        http_version: is_version_one.to_string(),
+        method,
+        request_target,
+        http_version
     })
 }
 
-fn validate_request_method(method: &str) -> bool {
+fn validate_request_method(method: &str) -> Result<String, RequestError> {
     let is_alphabetic = method.chars().all(|c| c.is_ascii_alphabetic());
-    is_alphabetic
+    if !is_alphabetic {
+        return Err(RequestError::InvalidRequestMethod);
+    }
+    Ok(method.to_string())
 }
 
-fn validate_http_version(http_version: &str) -> Result<String, String> {
+fn validate_http_version(http_version: &str) -> Result<String, RequestError> {
     let http_parts: Vec<&str> = http_version.split('/').collect();
     let http_version = http_parts.into_iter().last().unwrap();
     let is_version_one = http_version.eq("1.1");
     if !is_version_one {
-        return Err("Invalid http version".to_string())
+        return Err(RequestError::InvalidRequestHttpVersion);
     }
     Ok(http_version.to_string())
 }
 
-fn validate_target(target: &str) -> bool {
-    target.starts_with('/')
+fn validate_target(target: &str) -> Result<String, RequestError> {
+    if !target.starts_with('/') {
+        return Err(RequestError::InvalidRequestTarget);
+    }
+    Ok(target.to_string())
 }
 
 #[test]
@@ -82,8 +86,8 @@ User-Agent: curl/7.81.0\r\n\
 Accept: */*\r\n\
 \r\n";
 
-    let r = request_from_reader(Cursor::new(input))
-        .expect("Expected no error for valid GET request");
+    let r =
+        request_from_reader(Cursor::new(input)).expect("Expected no error for valid GET request");
 
     assert_eq!(r.request_line.method, "GET");
     assert_eq!(r.request_line.request_target, "/");
@@ -99,8 +103,7 @@ User-Agent: curl/7.81.0\r\n\
 Accept: */*\r\n\
 \r\n";
 
-    let r = request_from_reader(Cursor::new(input))
-        .expect("Expected no error for GET /coffee");
+    let r = request_from_reader(Cursor::new(input)).expect("Expected no error for GET /coffee");
 
     assert_eq!(r.request_line.method, "GET");
     assert_eq!(r.request_line.request_target, "/coffee");
@@ -117,8 +120,18 @@ Accept: */*\r\n\
 // \r\n";
 
 //     let err = request_from_reader(Cursor::new(input))
-//         .expect_err("Expected an error for invalid request line");
+//         .unwrap_err();
 
 //     // Optionally assert type or error message:
-//     // assert!(matches!(err, RequestError::InvalidRequestLine));
+//     assert!(matches!(err, RequestError::InvalidRequestLine));
 // }
+
+
+#[derive(Debug)]
+pub enum RequestError {
+    InvalidRequest,
+    InvalidRequestLine,
+    InvalidRequestMethod,
+    InvalidRequestTarget,
+    InvalidRequestHttpVersion,
+}
