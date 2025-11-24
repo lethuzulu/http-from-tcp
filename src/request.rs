@@ -31,41 +31,29 @@ pub fn request_from_reader<R: Read>(mut reader: R) -> Result<Request, RequestErr
         }
 
         accumulator.extend_from_slice(&buffer[..n]);
-
-        if let Some(pos) = accumulator.windows(2).position(|w| w == b"\r\n") {
-            let line = from_utf8(&accumulator[..pos]).unwrap();
-            let request_line = parse_request_line(line).map_err(|e| e)?;
+        let (request_line, pos) = parse_request_line(&accumulator).map_err(|e| e)?;
+        if let Some(request_line) = request_line {
+            accumulator.drain(..pos);
             return Ok(Request { request_line });
         }
     }
 }
 
-pub fn parse_request_line(request_string: &str) -> Result<RequestLine, RequestError> {
-    let request_string_parts: Vec<&str> = request_string.split_ascii_whitespace().collect();
+pub fn parse_request_line(request_string: &[u8]) -> Result<(Option<RequestLine>, usize), RequestError> {
 
-    if request_string_parts.len() < 3 {
-        return Err(RequestError::InvalidRequestLine);
+    if let Some(pos) = request_string.windows(2).position(|w| w == b"\r\n") {
+        let line = from_utf8(&request_string[..pos]).unwrap();
+        let request_string_parts: Vec<&str> = line.split_ascii_whitespace().collect();
+        // let request_line = parse_request_line(line).map_err(|e| e)?;
+        if request_string_parts.len() < 3 {
+            return Err(RequestError::InvalidRequestLine);
+        }
+        let method = validate_request_method(request_string_parts[0]).map_err(|e| e)?;
+        let request_target = validate_target(request_string_parts[1]).map_err(|e| e)?;
+        let http_version = validate_http_version(request_string_parts[2]).map_err(|e| e)?;
+        return Ok((Some(RequestLine { method, request_target, http_version }), pos+2));
     }
-
-    let _method = request_string_parts
-        .get(0)
-        .ok_or(RequestError::InvalidRequestLine)?;
-    let _target = request_string_parts
-        .get(1)
-        .ok_or(RequestError::InvalidRequestLine)?;
-    let _http_version = request_string_parts
-        .get(2)
-        .ok_or(RequestError::InvalidRequestLine)?;
-
-    let method = validate_request_method(_method).map_err(|e| e)?;
-    let request_target = validate_target(_target).map_err(|e| e)?;
-    let http_version = validate_http_version(_http_version).map_err(|e| e)?;
-
-    Ok(RequestLine {
-        method,
-        request_target,
-        http_version,
-    })
+    Ok((None, 0))
 }
 
 fn validate_request_method(method: &str) -> Result<String, RequestError> {
@@ -177,7 +165,7 @@ Accept: */*\r\n\
         pos: 0,
     };
 
-    let err = request_from_reader(Cursor::new(input))
+    let err = request_from_reader(chunk_reader)
         .unwrap_err();
 
     // Optionally assert type or error message:
