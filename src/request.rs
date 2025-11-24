@@ -1,6 +1,7 @@
 use std::io::Cursor;
-use std::io::Read;
 use std::io::Error as IoError;
+use std::io::Read;
+use std::str::from_utf8;
 
 #[derive(Debug)]
 pub struct Request {
@@ -15,19 +16,28 @@ pub struct RequestLine {
 }
 
 pub fn request_from_reader<R: Read>(mut reader: R) -> Result<Request, RequestError> {
-    let mut buffer = String::new();
 
-    let _ = reader
-        .read_to_string(&mut buffer)
-        .map_err(|_| RequestError::InvalidRequest)?;
+    let mut buffer = [0u8; 8];
+    let mut accumulator = Vec::new();
 
-    let (request_line_str, _rest) = buffer
-        .split_once("\r\n")
-        .ok_or(RequestError::InvalidRequest)?;
+    loop {
+        let n = match reader.read(&mut buffer) {
+            Ok(n) => n,
+            Err(_) => return Err(RequestError::InvalidRequest),
+        };
 
-    let request_line = parse_request_line(request_line_str).map_err(|e| e)?;
+        if n == 0 {
+            return Err(RequestError::InvalidRequest); // EOF before CRLF
+        }
 
-    Ok(Request { request_line })
+        accumulator.extend_from_slice(&buffer[..n]);
+
+        if let Some(pos) = accumulator.windows(2).position(|w| w == b"\r\n") {
+            let line = from_utf8(&accumulator[..pos]).unwrap();
+            let request_line = parse_request_line(line).map_err(|e| e)?;
+            return Ok(Request { request_line });
+        }
+    }
 }
 
 pub fn parse_request_line(request_string: &str) -> Result<RequestLine, RequestError> {
@@ -37,9 +47,15 @@ pub fn parse_request_line(request_string: &str) -> Result<RequestLine, RequestEr
         return Err(RequestError::InvalidRequestLine);
     }
 
-    let _method = request_string_parts.get(0).ok_or( RequestError::InvalidRequestLine)?;
-    let _target = request_string_parts.get(1).ok_or( RequestError::InvalidRequestLine)?;
-    let _http_version = request_string_parts.get(2).ok_or( RequestError::InvalidRequestLine)?;
+    let _method = request_string_parts
+        .get(0)
+        .ok_or(RequestError::InvalidRequestLine)?;
+    let _target = request_string_parts
+        .get(1)
+        .ok_or(RequestError::InvalidRequestLine)?;
+    let _http_version = request_string_parts
+        .get(2)
+        .ok_or(RequestError::InvalidRequestLine)?;
 
     let method = validate_request_method(_method).map_err(|e| e)?;
     let request_target = validate_target(_target).map_err(|e| e)?;
@@ -48,7 +64,7 @@ pub fn parse_request_line(request_string: &str) -> Result<RequestLine, RequestEr
     Ok(RequestLine {
         method,
         request_target,
-        http_version
+        http_version,
     })
 }
 
@@ -77,6 +93,31 @@ fn validate_target(target: &str) -> Result<String, RequestError> {
     Ok(target.to_string())
 }
 
+#[derive(Debug)]
+pub struct ChunkReader {
+    pub data: Vec<u8>,
+    pub num_bytes_per_read: usize,
+    pub pos: usize,
+}
+
+impl Read for ChunkReader {
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize, IoError> {
+        if self.pos >= self.data.len() {
+            return Ok(0);
+        }
+        let end = (self.pos + self.num_bytes_per_read).min(self.data.len());
+
+        let available = end - self.pos;
+
+        let to_copy = available.min(buf.len());
+
+        buf[..to_copy].copy_from_slice(&self.data[self.pos..self.pos + to_copy]);
+
+        self.pos += to_copy;
+        Ok(to_copy)
+    }
+}
+
 #[test]
 fn test_good_get_request_line() {
     let input = "\
@@ -86,8 +127,13 @@ User-Agent: curl/7.81.0\r\n\
 Accept: */*\r\n\
 \r\n";
 
-    let r =
-        request_from_reader(Cursor::new(input)).expect("Expected no error for valid GET request");
+    let chunk_reader = ChunkReader {
+        data: input.as_bytes().to_vec(),
+        num_bytes_per_read: 3,
+        pos: 0,
+    };
+
+    let r = request_from_reader(chunk_reader).expect("Expected no error for valid GET request");
 
     assert_eq!(r.request_line.method, "GET");
     assert_eq!(r.request_line.request_target, "/");
@@ -103,29 +149,40 @@ User-Agent: curl/7.81.0\r\n\
 Accept: */*\r\n\
 \r\n";
 
-    let r = request_from_reader(Cursor::new(input)).expect("Expected no error for GET /coffee");
+    let chunk_reader = ChunkReader {
+        data: input.as_bytes().to_vec(),
+        num_bytes_per_read: 4,
+        pos: 0,
+    };
+
+    let r = request_from_reader(chunk_reader).expect("Expected no error for GET /coffee");
 
     assert_eq!(r.request_line.method, "GET");
     assert_eq!(r.request_line.request_target, "/coffee");
     assert_eq!(r.request_line.http_version, "1.1");
 }
 
-// #[test]
-// fn test_invalid_request_line_not_enough_parts() {
-//     let input = "\
-// /coffee HTTP/1.1\r\n\
-// Host: localhost:42069\r\n\
-// User-Agent: curl/7.81.0\r\n\
-// Accept: */*\r\n\
-// \r\n";
+#[test]
+fn test_invalid_request_line_not_enough_parts() {
+    let input = "\
+/coffee HTTP/1.1\r\n\
+Host: localhost:42069\r\n\
+User-Agent: curl/7.81.0\r\n\
+Accept: */*\r\n\
+\r\n";
 
-//     let err = request_from_reader(Cursor::new(input))
-//         .unwrap_err();
+    let chunk_reader = ChunkReader {
+        data: input.as_bytes().to_vec(),
+        num_bytes_per_read: 8,
+        pos: 0,
+    };
 
-//     // Optionally assert type or error message:
-//     assert!(matches!(err, RequestError::InvalidRequestLine));
-// }
+    let err = request_from_reader(Cursor::new(input))
+        .unwrap_err();
 
+    // Optionally assert type or error message:
+    assert!(matches!(err, RequestError::InvalidRequestLine));
+}
 
 #[derive(Debug)]
 pub enum RequestError {
