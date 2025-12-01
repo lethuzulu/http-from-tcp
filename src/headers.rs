@@ -53,8 +53,21 @@ impl Headers {
         if key.ends_with(' ') {
             return Err(RequestError::InvalidHeader);
         }
-        // Trim leading whitespace and return 
-        Ok(key.trim_start().to_lowercase())
+        
+        // Trim leading whitespace
+        let trimmed = key.trim_start();
+                
+        // Check that ALL characters are valid
+        let is_valid = trimmed.chars().all(|ch| {
+            ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'
+        });
+        
+        if !is_valid {
+            return Err(RequestError::InvalidHeader);
+        }
+        
+        // Convert to lowercase for case-insensitive storage
+        Ok(trimmed.to_lowercase())
     }
 
     fn validate_value(value: &str) -> String {
@@ -206,5 +219,43 @@ mod tests {
         assert_eq!(n, 0);      // No bytes consumed
         assert!(!done);        // Not done
         assert!(headers.map.is_empty()); // Nothing parsed yet
+    }
+    
+    #[test]
+    fn test_case_insensitive_headers() {
+        let mut headers = Headers::new();
+        let data = b"Content-Length: 42\r\n\r\n";
+        let result = headers.parse(data);
+        
+        assert!(result.is_ok());
+        // Should be stored as lowercase
+        assert_eq!(
+            headers.map.get("content-length"),
+            Some(&"42".to_string())
+        );
+    }
+    
+    #[test]
+    fn test_mixed_case_headers() {
+        let mut headers = Headers::new();
+        let data = b"CoNtEnT-TyPe: application/json\r\n\r\n";
+        let result = headers.parse(data);
+        
+        assert!(result.is_ok());
+        // Should be stored as lowercase
+        assert_eq!(
+            headers.map.get("content-type"),
+            Some(&"application/json".to_string())
+        );
+    }
+    
+    #[test]
+    fn test_invalid_character_in_key() {
+        let mut headers = Headers::new();
+        // © is an invalid character in header names
+        let data = b"H\xc2\xa9st: localhost:42069\r\n\r\n"; // H©st in UTF-8
+        let result = headers.parse(data);
+        
+        assert!(result.is_err(), "expected error for invalid character in header key");
     }
 }
