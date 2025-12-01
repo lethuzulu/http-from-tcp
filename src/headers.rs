@@ -4,6 +4,7 @@ use std::str::from_utf8;
 
 use crate::request::RequestError;
 
+#[derive(Debug)]
 pub struct Headers {
     pub map: HashMap<String, String>,
 }

@@ -3,18 +3,22 @@ use std::io::Error as IoError;
 use std::io::Read;
 use std::str::from_utf8;
 
+use crate::headers::Headers;
+
 const BUFFER_SIZE: usize = 8;
 
 #[derive(Debug)]
 pub enum ParseState {
     Initialized,
     Done,
+    RequestStateParsingHeaders
 }
 
 #[derive(Debug)]
 pub struct Request {
     pub state: ParseState,
     pub request_line: Option<RequestLine>,
+    pub headers: Headers
 }
 
 impl Request {
@@ -22,6 +26,7 @@ impl Request {
         Self {
             state: ParseState::Initialized,
             request_line: None,
+            headers: Headers::new()
         }
     }
 
@@ -31,12 +36,19 @@ impl Request {
                 let (request_line, num_bytes) = parse_request_line(data)?;
                 match request_line {
                     Some(r) => {
-                        self.state = ParseState::Done;
+                        self.state = ParseState::RequestStateParsingHeaders;
                         self.request_line = Some(r);
                         return Ok(num_bytes);
                     }
                     None => return Ok(num_bytes),
                 }
+            }
+            ParseState::RequestStateParsingHeaders => {
+                let (consumed, is_done) = self.headers.parse(data)?;
+                if is_done {
+                    self.state = ParseState::Done
+                }
+                return Ok(consumed)
             }
             ParseState::Done => return Err(RequestError::DoneState),
         }
@@ -58,13 +70,13 @@ pub fn request_from_reader<R: Read>(mut reader: R) -> Result<Request, RequestErr
         if n == 0 {
             match request.state {
                 ParseState::Done => return Ok(request),
-                ParseState::Initialized => return Err(RequestError::InvalidRequest),
+                ParseState::Initialized | ParseState::RequestStateParsingHeaders => return Err(RequestError::InvalidRequest),
             }
         }
 
         accumulator.extend_from_slice(&buffer[..n]);
         match request.state {
-            ParseState::Initialized => {
+            ParseState::Initialized | ParseState::RequestStateParsingHeaders => {
                 let consumed = request.parse(&accumulator).unwrap();
                 if consumed > 0 {
                     let _ = accumulator.drain(..consumed);
