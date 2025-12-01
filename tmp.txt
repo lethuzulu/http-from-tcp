@@ -1,6 +1,2 @@
 Connection Established.
-GET /coffee HTTP/1.1
-Host: localhost:42069
-User-Agent: curl/8.5.0
-Accept: */*
-
+Request Request { state: Done, request_line: Some(RequestLine { method: "GET", request_target: "/prime/agen", http_version: "1.1" }) }
