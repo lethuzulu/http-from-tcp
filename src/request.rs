@@ -220,6 +220,8 @@ fn test_invalid_request_line_not_enough_parts() {
 
     // Optionally assert type or error message:
     assert!(matches!(err, RequestError::InvalidRequestLine));
+    
+    
 }
 
 #[derive(Debug)]

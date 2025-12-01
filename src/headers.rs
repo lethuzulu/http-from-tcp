@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::str::from_utf8;
 
 use crate::request::RequestError;
@@ -18,7 +19,16 @@ impl Headers {
 
         match key_value {
             Some((key, value)) => {
-                let _ = self.map.insert(key, value);
+                match self.map.entry(key) {
+                    Entry::Occupied(mut entry) => {
+                        entry.get_mut().push_str(", ");
+                        entry.get_mut().push_str(&value);
+                        
+                    },
+                    Entry::Vacant(entry) => {
+                        let __ = entry.insert(value);
+                    }
+                }
                 return Ok((consumed, false));
             }
             None => {
@@ -49,15 +59,12 @@ impl Headers {
     }
 
     fn validate_key(key: &str) -> Result<String, RequestError> {
-        // Check if there's trailing whitespace (space before colon)
         if key.ends_with(' ') {
             return Err(RequestError::InvalidHeader);
         }
-        
-        // Trim leading whitespace
+
         let trimmed = key.trim_start();
-                
-        // Check that ALL characters are valid
+
         let is_valid = trimmed.chars().all(|ch| {
             ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'
         });
@@ -66,7 +73,6 @@ impl Headers {
             return Err(RequestError::InvalidHeader);
         }
         
-        // Convert to lowercase for case-insensitive storage
         Ok(trimmed.to_lowercase())
     }
 
@@ -257,5 +263,30 @@ mod tests {
         let result = headers.parse(data);
         
         assert!(result.is_err(), "expected error for invalid character in header key");
+    }
+    
+    #[test]
+    fn test_duplicate_header_combining() {
+        let mut headers = Headers::new();
+    
+        // Parse the first header (Set-Cookie: session_id=abc)
+        let data1 = b"Set-Cookie: session_id=abc\r\n";
+        let result1 = headers.parse(data1);
+        assert!(result1.is_ok());
+    
+        // Parse the second header (Set-Cookie: expires=never)
+        let data2 = b"Set-Cookie: expires=never\r\n";
+        let result2 = headers.parse(data2);
+        assert!(result2.is_ok());
+    
+        // Assert that there is only ONE entry in the map
+        assert_eq!(headers.map.len(), 1);
+    
+        // Assert that the value is correctly combined with ", "
+        assert_eq!(
+            headers.map.get("set-cookie"),
+            Some(&"session_id=abc, expires=never".to_string()),
+            "Duplicate headers should be combined with a comma and space."
+        );
     }
 }
