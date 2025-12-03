@@ -46,6 +46,10 @@ impl Headers {
             }
         }
     }
+    
+    pub fn get(&self, key: &str) -> Option<&str>{
+      self.map.get(&key.to_lowercase()).map(|v| v.as_str())
+    }
 
     fn parse_header(data: &[u8]) -> Result<(Option<(String, String)>, usize), RequestError> {
         if let Some(pos) = data.windows(2).position(|w| w == b"\r\n") {

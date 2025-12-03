@@ -5,12 +5,14 @@ use std::str::from_utf8;
 use crate::headers::Headers;
 
 const BUFFER_SIZE: usize = 8;
+const CONTENT_LENGTH: &str = "content-length";
 
 #[derive(Debug)]
 pub enum ParseState {
     Initialized,
     Done,
     RequestStateParsingHeaders,
+    RequestStateParsingBody,
 }
 
 #[derive(Debug)]
@@ -18,6 +20,7 @@ pub struct Request {
     pub state: ParseState,
     pub request_line: Option<RequestLine>,
     pub headers: Headers,
+    pub body: Vec<u8>,
 }
 
 impl Request {
@@ -26,6 +29,7 @@ impl Request {
             state: ParseState::Initialized,
             request_line: None,
             headers: Headers::new(),
+            body: Vec::new(),
         }
     }
 
@@ -45,9 +49,30 @@ impl Request {
             ParseState::RequestStateParsingHeaders => {
                 let (consumed, is_done) = self.headers.parse(data)?;
                 if is_done {
-                    self.state = ParseState::Done
+                    self.state = ParseState::RequestStateParsingBody
                 }
                 return Ok(consumed);
+            }
+            ParseState::RequestStateParsingBody => {
+                match self.headers.get(CONTENT_LENGTH) {
+                    Some(v) => {
+                        let body_length = v.parse::<u32>().map_err(|__|RequestError::InvalidHeader)?;
+                        if data.len() > body_length as usize {
+                            return Err(RequestError::InvalidHeader)
+                        }
+                        if data.len() < body_length as usize {
+                            let __ = self.body.extend_from_slice(data);
+                            return Ok(data.len())
+                        }
+                        let __ = self.body.extend_from_slice(data);
+                        self.state = ParseState::Done;
+                        Ok(data.len())
+                    },
+                    None => {
+                        self.state = ParseState::Done;
+                        return Ok(data.len())
+                    }
+                }
             }
             ParseState::Done => return Err(RequestError::DoneState),
         }
@@ -69,7 +94,7 @@ pub fn request_from_reader<R: Read>(mut reader: R) -> Result<Request, RequestErr
         if n == 0 {
             match request.state {
                 ParseState::Done => return Ok(request),
-                ParseState::Initialized | ParseState::RequestStateParsingHeaders => {
+                ParseState::Initialized | ParseState::RequestStateParsingHeaders | ParseState::RequestStateParsingBody => {
                     return Err(RequestError::InvalidRequest);
                 }
             }
@@ -77,7 +102,7 @@ pub fn request_from_reader<R: Read>(mut reader: R) -> Result<Request, RequestErr
 
         accumulator.extend_from_slice(&buffer[..n]);
         match request.state {
-            ParseState::Initialized | ParseState::RequestStateParsingHeaders => {
+            ParseState::Initialized | ParseState::RequestStateParsingHeaders | ParseState::RequestStateParsingBody => {
                 let consumed = request.parse(&accumulator).unwrap();
                 if consumed > 0 {
                     let _ = accumulator.drain(..consumed);
@@ -136,6 +161,16 @@ fn validate_target(target: &str) -> Result<String, RequestError> {
         return Err(RequestError::InvalidRequestTarget);
     }
     Ok(target.to_string())
+}
+
+pub fn parse_body(data: &[u8], body_length: u32) -> Result<(), RequestError>{
+    if data. len() > body_length as usize {
+        return Err(RequestError::InvalidHeader);
+    }
+    
+    let mut body = Vec::new();
+    body.extend_from_slice(data);
+    unimplemented!()
 }
 
 #[derive(Debug)]
