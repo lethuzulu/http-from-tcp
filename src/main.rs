@@ -1,7 +1,7 @@
-use std::net::TcpListener;
 use crate::request::request_from_reader;
-mod request;
+use std::net::TcpListener;
 mod headers;
+mod request;
 
 fn main() {
     let tcp_listener = TcpListener::bind("127.0.0.1:42069").unwrap();

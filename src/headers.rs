@@ -16,27 +16,32 @@ impl Headers {
         }
     }
     pub fn parse(&mut self, data: &[u8]) -> Result<(usize, bool), RequestError> {
-        let (key_value, consumed) = Self::parse_header(data)?;
+        
+        let mut total_consumed = 0usize;
+        loop {
+            let (key_value, consumed) = Self::parse_header(&data[total_consumed..])?;
 
-        match key_value {
-            Some((key, value)) => {
-                match self.map.entry(key) {
-                    Entry::Occupied(mut entry) => {
-                        entry.get_mut().push_str(", ");
-                        entry.get_mut().push_str(&value);
-                        
-                    },
-                    Entry::Vacant(entry) => {
-                        let __ = entry.insert(value);
+            match key_value {
+                Some((key, value)) => {
+                    match self.map.entry(key) {
+                        Entry::Occupied(mut entry) => {
+                            entry.get_mut().push_str(", ");
+                            entry.get_mut().push_str(&value);
+                        }
+                        Entry::Vacant(entry) => {
+                            let __ = entry.insert(value);
+                        }
                     }
+                    total_consumed = total_consumed + consumed;
                 }
-                return Ok((consumed, false));
-            }
-            None => {
-                if consumed > 0 {
-                    return Ok((consumed, true));
-                } else {
-                    return Ok((consumed, false));
+                None => {
+                    if consumed > 0 {
+                        total_consumed = total_consumed + consumed;
+                        return Ok((total_consumed, true));
+                    } else {
+                        
+                        return Ok((total_consumed, false));
+                    }
                 }
             }
         }
@@ -66,14 +71,14 @@ impl Headers {
 
         let trimmed = key.trim_start();
 
-        let is_valid = trimmed.chars().all(|ch| {
-            ch.is_ascii_alphanumeric() || ch == '-' || ch == '_'
-        });
-        
+        let is_valid = trimmed
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_');
+
         if !is_valid {
             return Err(RequestError::InvalidHeader);
         }
-        
+
         Ok(trimmed.to_lowercase())
     }
 
@@ -91,10 +96,10 @@ mod tests {
         let mut headers = Headers::new();
         let data = b"Host: localhost:42069\r\n\r\n";
         let result = headers.parse(data);
-        
+
         assert!(result.is_ok(), "expected no error for valid header");
         let (n, done) = result.unwrap();
-        
+
         assert_eq!(
             headers.map.get("Host").map(|s| s.as_str()),
             Some("localhost:42069")
@@ -109,10 +114,10 @@ mod tests {
         // Extra leading and trailing whitespace in the value
         let data = b"Host:    localhost:42069    \r\n\r\n";
         let result = headers.parse(data);
-        
+
         assert!(result.is_ok(), "expected no error with extra whitespace");
         let (n, done) = result.unwrap();
-        
+
         // Value should be trimmed
         assert_eq!(
             headers.map.get("Host").map(|s| s.as_str()),
@@ -128,10 +133,13 @@ mod tests {
         // Leading whitespace before key is valid
         let data = b"          Host: localhost:42069    \r\n\r\n";
         let result = headers.parse(data);
-        
-        assert!(result.is_ok(), "expected no error with leading whitespace on key");
+
+        assert!(
+            result.is_ok(),
+            "expected no error with leading whitespace on key"
+        );
         let (n, done) = result.unwrap();
-        
+
         assert_eq!(
             headers.map.get("Host").map(|s| s.as_str()),
             Some("localhost:42069")
@@ -143,7 +151,7 @@ mod tests {
     #[test]
     fn test_valid_2_headers_with_existing_headers() {
         let mut headers = Headers::new();
-        
+
         // Parse first header
         let data1 = b"Host: localhost:42069\r\n";
         let result1 = headers.parse(data1);
@@ -155,7 +163,7 @@ mod tests {
             headers.map.get("Host").map(|s| s.as_str()),
             Some("localhost:42069")
         );
-        
+
         // Parse second header (headers already exist from first parse)
         let data2 = b"Content-Type: application/json\r\n";
         let result2 = headers.parse(data2);
@@ -163,7 +171,7 @@ mod tests {
         let (n2, done2) = result2.unwrap();
         assert_eq!(n2, 32);
         assert!(!done2);
-        
+
         // Both headers should be present
         assert_eq!(
             headers.map.get("Host").map(|s| s.as_str()),
@@ -179,7 +187,7 @@ mod tests {
     #[test]
     fn test_valid_done() {
         let mut headers = Headers::new();
-        
+
         // Parse a header first
         let data1 = b"Host: localhost:42069\r\n";
         let result1 = headers.parse(data1);
@@ -187,15 +195,15 @@ mod tests {
         let (n1, done1) = result1.unwrap();
         assert_eq!(n1, 23);
         assert!(!done1);
-        
+
         // Now parse the empty line (end of headers)
         let data2 = b"\r\n";
         let result2 = headers.parse(data2);
         assert!(result2.is_ok());
         let (n2, done2) = result2.unwrap();
         assert_eq!(n2, 2); // Consumed 2 bytes (\r\n)
-        assert!(done2);     // Should signal done=true
-        
+        assert!(done2); // Should signal done=true
+
         // Header should still be present
         assert_eq!(
             headers.map.get("Host").map(|s| s.as_str()),
@@ -209,7 +217,7 @@ mod tests {
         // Space before colon is invalid
         let data = b"       Host : localhost:42069       \r\n\r\n";
         let result = headers.parse(data);
-        
+
         assert!(result.is_err(), "expected error due to invalid spacing");
         assert!(headers.map.is_empty());
     }
@@ -220,34 +228,31 @@ mod tests {
         // No CRLF present, so not enough data
         let data = b"Host: localhost:42069";
         let result = headers.parse(data);
-        
+
         assert!(result.is_ok());
         let (n, done) = result.unwrap();
-        assert_eq!(n, 0);      // No bytes consumed
-        assert!(!done);        // Not done
+        assert_eq!(n, 0); // No bytes consumed
+        assert!(!done); // Not done
         assert!(headers.map.is_empty()); // Nothing parsed yet
     }
-    
+
     #[test]
     fn test_case_insensitive_headers() {
         let mut headers = Headers::new();
         let data = b"Content-Length: 42\r\n\r\n";
         let result = headers.parse(data);
-        
+
         assert!(result.is_ok());
         // Should be stored as lowercase
-        assert_eq!(
-            headers.map.get("content-length"),
-            Some(&"42".to_string())
-        );
+        assert_eq!(headers.map.get("content-length"), Some(&"42".to_string()));
     }
-    
+
     #[test]
     fn test_mixed_case_headers() {
         let mut headers = Headers::new();
         let data = b"CoNtEnT-TyPe: application/json\r\n\r\n";
         let result = headers.parse(data);
-        
+
         assert!(result.is_ok());
         // Should be stored as lowercase
         assert_eq!(
@@ -255,34 +260,37 @@ mod tests {
             Some(&"application/json".to_string())
         );
     }
-    
+
     #[test]
     fn test_invalid_character_in_key() {
         let mut headers = Headers::new();
         // © is an invalid character in header names
         let data = b"H\xc2\xa9st: localhost:42069\r\n\r\n"; // H©st in UTF-8
         let result = headers.parse(data);
-        
-        assert!(result.is_err(), "expected error for invalid character in header key");
+
+        assert!(
+            result.is_err(),
+            "expected error for invalid character in header key"
+        );
     }
-    
+
     #[test]
     fn test_duplicate_header_combining() {
         let mut headers = Headers::new();
-    
+
         // Parse the first header (Set-Cookie: session_id=abc)
         let data1 = b"Set-Cookie: session_id=abc\r\n";
         let result1 = headers.parse(data1);
         assert!(result1.is_ok());
-    
+
         // Parse the second header (Set-Cookie: expires=never)
         let data2 = b"Set-Cookie: expires=never\r\n";
         let result2 = headers.parse(data2);
         assert!(result2.is_ok());
-    
+
         // Assert that there is only ONE entry in the map
         assert_eq!(headers.map.len(), 1);
-    
+
         // Assert that the value is correctly combined with ", "
         assert_eq!(
             headers.map.get("set-cookie"),

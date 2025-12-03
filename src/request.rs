@@ -1,4 +1,3 @@
-
 use std::io::Error as IoError;
 use std::io::Read;
 use std::str::from_utf8;
@@ -11,14 +10,14 @@ const BUFFER_SIZE: usize = 8;
 pub enum ParseState {
     Initialized,
     Done,
-    RequestStateParsingHeaders
+    RequestStateParsingHeaders,
 }
 
 #[derive(Debug)]
 pub struct Request {
     pub state: ParseState,
     pub request_line: Option<RequestLine>,
-    pub headers: Headers
+    pub headers: Headers,
 }
 
 impl Request {
@@ -26,7 +25,7 @@ impl Request {
         Self {
             state: ParseState::Initialized,
             request_line: None,
-            headers: Headers::new()
+            headers: Headers::new(),
         }
     }
 
@@ -48,7 +47,7 @@ impl Request {
                 if is_done {
                     self.state = ParseState::Done
                 }
-                return Ok(consumed)
+                return Ok(consumed);
             }
             ParseState::Done => return Err(RequestError::DoneState),
         }
@@ -70,7 +69,9 @@ pub fn request_from_reader<R: Read>(mut reader: R) -> Result<Request, RequestErr
         if n == 0 {
             match request.state {
                 ParseState::Done => return Ok(request),
-                ParseState::Initialized | ParseState::RequestStateParsingHeaders => return Err(RequestError::InvalidRequest),
+                ParseState::Initialized | ParseState::RequestStateParsingHeaders => {
+                    return Err(RequestError::InvalidRequest);
+                }
             }
         }
 
@@ -232,8 +233,6 @@ fn test_invalid_request_line_not_enough_parts() {
 
     // Optionally assert type or error message:
     assert!(matches!(err, RequestError::InvalidRequestLine));
-    
-    
 }
 
 #[derive(Debug)]
