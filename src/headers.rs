@@ -16,7 +16,6 @@ impl Headers {
         }
     }
     pub fn parse(&mut self, data: &[u8]) -> Result<(usize, bool), RequestError> {
-        
         let mut total_consumed = 0usize;
         loop {
             let (key_value, consumed) = Self::parse_header(&data[total_consumed..])?;
@@ -39,16 +38,15 @@ impl Headers {
                         total_consumed = total_consumed + consumed;
                         return Ok((total_consumed, true));
                     } else {
-                        
                         return Ok((total_consumed, false));
                     }
                 }
             }
         }
     }
-    
-    pub fn get(&self, key: &str) -> Option<&str>{
-      self.map.get(&key.to_lowercase()).map(|v| v.as_str())
+
+    pub fn get(&self, key: &str) -> Option<&str> {
+        self.map.get(&key.to_lowercase()).map(|v| v.as_str())
     }
 
     fn parse_header(data: &[u8]) -> Result<(Option<(String, String)>, usize), RequestError> {

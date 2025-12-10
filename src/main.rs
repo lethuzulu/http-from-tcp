@@ -1,16 +1,29 @@
-use crate::request::request_from_reader;
+use crate::{request::request_from_reader, server::Server};
 use std::net::TcpListener;
+use ctrlc;
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 mod headers;
 mod request;
+mod server;
+
+const PORT: u16 = 42069;
 
 fn main() {
-    let tcp_listener = TcpListener::bind("127.0.0.1:42069").unwrap();
+    let server = Server::serve(PORT).unwrap();
 
-    loop {
-        let (tcp_stream, __) = tcp_listener.accept().unwrap();
-        println!("Connection Established.");
+    let running = Arc::new(AtomicBool::new(true));
 
-        let request = request_from_reader(tcp_stream).unwrap();
-        println!("Request {:?}", request)
+    let running_clone = Arc::clone(&running);
+    ctrlc::set_handler(move || {
+        running_clone.store(false, Ordering::SeqCst);
+    }).expect("Error setting Ctrl-C handler");
+
+    while running.load(Ordering::SeqCst) {
+        std::thread::sleep(std::time::Duration::from_millis(100));
     }
+
+    println!("Shutting down server...");
+    server.close();
+    println!("Server stopped");
+
 }
