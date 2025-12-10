@@ -3,6 +3,8 @@ use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::sync::Arc;
+use crate::response::{StatusCode, write_status_line, get_default_headers, write_headers};
+
 
 #[derive(Debug)]
 pub struct Server {
@@ -55,13 +57,13 @@ impl Server {
 }
 
 fn handle(mut stream: TcpStream) -> Result<(), std::io::Error> {
-    let response = "HTTP/1.1 200 OK\r\n\
-                   Content-Type: text/plain\r\n\
-                   Content-Length: 13\r\n\
-                   \r\n\
-                   Hello World!\n";
+
+    write_status_line(&mut stream, StatusCode::OK)?;
+    let headers = get_default_headers(0);
+
+    write_headers(&mut stream, &headers)?;
     
-    stream.write_all(response.as_bytes())?;
+    // 4. Flush to ensure it's sent
     stream.flush()?;
     
     Ok(())

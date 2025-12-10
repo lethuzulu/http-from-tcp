@@ -5,6 +5,7 @@ use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 mod headers;
 mod request;
 mod server;
+mod response;
 
 const PORT: u16 = 42069;
 
